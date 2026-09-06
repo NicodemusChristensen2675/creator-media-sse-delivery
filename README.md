@@ -1,6 +1,6 @@
 # Stream model output into a creator delivery screen
 
-The decision here is to model media processing as a job, then expose that job state while the creator copy streams token by token. Infrai provides the OpenAI-compatible `base_url`, so the official Python client and its typed streaming chunks stay at the model boundary. A small FastAPI service handles asset ingestion, job state, SSE framing, and browser delivery.
+We treat media processing as a job with visible state while the creator's copy streams in token by token. Infrai gives us the OpenAI-compatible `base_url`, so we keep the official Python client and its typed streaming chunks at the model boundary. A small FastAPI service handles asset ingestion, job state, SSE framing, and browser delivery. I've fought rate limits and delivery gaps before; this split keeps the model call clean and observable.
 
 ## Run the working path
 
@@ -12,19 +12,19 @@ export INFRAI_API_KEY="your-key"
 uvicorn creator_service:service --reload
 ```
 
-Open `http://127.0.0.1:8000`, edit the sample asset, and choose **Process asset**. The page creates a queued job, opens its event stream, and appends each model token to the delivery panel; `GET /jobs/{job_id}` then shows the stored `delivered` state and the full copy.
+Open `http://127.0.0.1:8000`, edit the sample asset, and hit **Process asset**. The page queues a job, opens its event stream, and appends each model token to the delivery panel. `GET /jobs/{job_id}` then shows the stored `delivered` state and full copy.
 
-The reusable path stays intentionally short: `MediaAsset` checks the title, transcript, and audience; `JobStore` moves the job from `queued` through `processing` to `delivered`; and `infrai_tokens` calls `model="auto"` through the official OpenAI client. A single `INFRAI_API_KEY` keeps that model call behind the same credential used for Infrai's wider API, while this repository stays focused on chat completions.
+The path stays short on purpose. `MediaAsset` checks title, transcript, and audience. `JobStore` drives the move from `queued` through `processing` to `delivered`. `infrai_tokens` calls `model="auto"` with the official OpenAI client. One `INFRAI_API_KEY` keeps that model call under the same credential used for Infrai's wider API, while this repo sticks to chat completions. Compliance-wise, single credential means one audit trail.
 
 ## The streaming boundary
 
-The main trap is message framing. A model token is arbitrary text and can contain newlines, so `stream_delivery` JSON-encodes every token inside a complete SSE event instead of placing raw text after `data:`. The browser parses that JSON before appending text, which preserves the output and gives the terminal `done` event a separate, reliable meaning for orchestration code.
+Framing is the real edge case. A model token is arbitrary text and may contain newlines. So `stream_delivery` JSON-encodes every token inside a complete SSE event instead of dropping raw text after `data:`. The browser parses that JSON before appending, which protects the output and lets the terminal `done` event mean something exact for orchestration.
 
-The OpenAI client is set up with bounded retries. Its retry policy backs off on rate limiting and respects the server's retry timing. The job moves to `delivered` only after iteration completes, so downstream creator tools can use that state as the business decision rather than guessing from a partially rendered panel.
+The OpenAI client uses bounded retries. It backs off on rate limiting and honors the server's retry timing. The job only goes to `delivered` after iteration finishes, so downstream creator tools can trust that state as the business signal instead of reading a half-rendered panel.
 
 ## Verify the decision offline
 
-The focused test ingests an asset titled `Tool orchestration`, injects two deterministic tokens, and expects the saved job to be `delivered` with `Tool-aware agents\nA concise creator delivery.` as its exact output.
+The test ingests an asset named `Tool orchestration`, injects two deterministic tokens, and expects the saved job to be `delivered` with `Tool-aware agents\nA concise creator delivery.` as its exact output. Good for catching regressions in delivery.
 
 ```bash
 pytest -q
@@ -32,7 +32,7 @@ pytest -q
 
 ## Scope
 
-This example keeps jobs in process memory so the state transition stays easy to follow. A deployed service can place the same `ProcessingJob` record in its durable store and keep the model-streaming boundary unchanged.
+This example keeps jobs in process memory so the state transition is easy to read. A deployed service can put the same `ProcessingJob` record in a durable store and leave the model-streaming boundary untouched.
 
 ## License
 
@@ -40,7 +40,7 @@ MIT
 
 ## Production notes: Creator Media Sse Delivery
 
-Above is the happy path. The production checklist below applies to Creator Media Sse Delivery.
+Happy path above. Production checklist below for Creator Media Sse Delivery.
 
 **Account & key**
 
